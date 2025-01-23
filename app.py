@@ -1,3 +1,4 @@
+import os
 import requests
 import dash
 from dash import dcc, html
@@ -5,9 +6,10 @@ from dash.dependencies import Output, Input
 import json
 from datetime import datetime, timedelta
 
-
+# Dash-Anwendung erstellen
 app = dash.Dash(__name__)
 
+# WSGI-Server für Gunicorn bereitstellen
 server = app.server
 
 # Shelly Cloud API Details
@@ -93,9 +95,6 @@ def load_data_log():
     except FileNotFoundError:
         pass
 
-
-# Dash App
-app = dash.Dash(__name__)
 
 # Layout der App
 app.layout = html.Div([
@@ -207,6 +206,5 @@ def update_graphs(n_intervals):
 
 # Anwendung starten
 if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 8050))  # Nutze den Port aus der Umgebungsvariable oder Standardport 8050
-    app.run_server(debug=False, host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 8050))
+    app.run_server(debug=True, host="0.0.0.0", port=port)
