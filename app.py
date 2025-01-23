@@ -207,5 +207,6 @@ def update_graphs(n_intervals):
 
 # Anwendung starten
 if __name__ == "__main__":
-    load_data_log()  # Daten beim Start laden
-    app.run_server(debug=True)
+    import os
+    port = int(os.environ.get("PORT", 8050))  # Nutze den Port aus der Umgebungsvariable oder Standardport 8050
+    app.run_server(debug=False, host="0.0.0.0", port=port)
