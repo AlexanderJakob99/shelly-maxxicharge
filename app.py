@@ -5,6 +5,9 @@ from dash.dependencies import Output, Input
 import json
 from datetime import datetime, timedelta
 
+
+app = dash.Dash(__name__)
+
 server = app.server
 
 # Shelly Cloud API Details
