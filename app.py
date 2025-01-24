@@ -2,7 +2,7 @@ import os
 import requests
 import dash
 from dash import dcc, html
-from dash.dependencies import Output, Input
+from dash.dependencies import Output, Input, State
 import json
 from datetime import datetime, timedelta
 
@@ -61,81 +61,22 @@ def get_shelly_data():
         return [0.0, 0.0, 0.0]
 
 
-# Berechnung von Verbrauch, Einspeisung und Netzbezug
-def calculate_energy(power_values):
-    power_values = [float(p) for p in power_values]
-    consumption = sum([p for p in power_values if p > 0])  # Nur positive Werte (Stromverbrauch)
-    feed_in = abs(sum([p for p in power_values if p < 0]))  # Nur negative Werte (Einspeisung)
-    net_usage = consumption - feed_in
-    return consumption, feed_in, net_usage  # Stromverbrauch bleibt unverändert
-
-
-# Funktion, um Daten auf die letzten 24 Stunden zu beschränken
-def trim_data_log():
-    global data_log, statistics_log
-    now = datetime.now()
-    twenty_four_hours_ago = now - timedelta(hours=24)
-
-    # Trim Data Log
-    valid_indices = [i for i, timestamp in enumerate(data_log["timestamps"]) if timestamp >= twenty_four_hours_ago]
-    data_log["timestamps"] = [data_log["timestamps"][i] for i in valid_indices]
-    data_log["consumption"] = [data_log["consumption"][i] for i in valid_indices]
-    data_log["feed_in"] = [data_log["feed_in"][i] for i in valid_indices]
-    data_log["net_usage"] = [data_log["net_usage"][i] for i in valid_indices]
-
-    # Trim Statistics Log
-    valid_indices_stats = [i for i, timestamp in enumerate(statistics_log["timestamps"]) if timestamp >= twenty_four_hours_ago]
-    statistics_log["timestamps"] = [statistics_log["timestamps"][i] for i in valid_indices_stats]
-    statistics_log["total_consumption"] = [statistics_log["total_consumption"][i] for i in valid_indices_stats]
-    statistics_log["surplus_energy"] = [statistics_log["surplus_energy"][i] for i in valid_indices_stats]
-    statistics_log["generated_energy"] = [statistics_log["generated_energy"][i] for i in valid_indices_stats]
-
-
-# Funktion, um die Daten in Dateien zu speichern
-def save_data_log():
-    with open(DATA_FILE, "w") as file:
-        json.dump(data_log, file, default=str)
-
-
-def save_statistics_log():
-    with open(STATS_FILE, "w") as file:
-        json.dump(statistics_log, file, default=str)
-
-
-# Funktion, um die Daten aus Dateien zu laden
-def load_data_log():
-    global data_log
-    try:
-        with open(DATA_FILE, "r") as file:
-            loaded_data = json.load(file)
-            data_log["timestamps"] = [datetime.fromisoformat(ts) for ts in loaded_data["timestamps"]]
-            data_log["consumption"] = loaded_data["consumption"]
-            data_log["feed_in"] = loaded_data["feed_in"]
-            data_log["net_usage"] = loaded_data["net_usage"]
-    except FileNotFoundError:
-        pass
-
-
-def load_statistics_log():
-    global statistics_log
-    try:
-        with open(STATS_FILE, "r") as file:
-            loaded_stats = json.load(file)
-            statistics_log["timestamps"] = [datetime.fromisoformat(ts) for ts in loaded_stats["timestamps"]]
-            statistics_log["total_consumption"] = loaded_stats["total_consumption"]
-            statistics_log["surplus_energy"] = loaded_stats["surplus_energy"]
-            statistics_log["generated_energy"] = loaded_stats["generated_energy"]
-    except FileNotFoundError:
-        pass
-
-
 # Layout der App
 app.layout = html.Div([
     html.H1("Shelly 3EM Dashboard", style={"textAlign": "center"}),
 
     html.Div([
-        # Linke Spalte: Einzelne Graphen und kombinierter Graph
+        # Linke Spalte: Graphen und Buttons
         html.Div([
+            # Buttons für die Zeiträume
+            html.Div([
+                html.Button("Letzte 24 Stunden", id="btn-24h", n_clicks=0, style={"margin": "5px"}),
+                html.Button("Letzte Stunde", id="btn-1h", n_clicks=0, style={"margin": "5px"}),
+                html.Button("Letzte 30 Minuten", id="btn-30m", n_clicks=0, style={"margin": "5px"}),
+                html.Button("Letzte 10 Minuten", id="btn-10m", n_clicks=0, style={"margin": "5px"})
+            ], style={"textAlign": "center", "marginBottom": "20px"}),
+
+            # Graphen
             dcc.Graph(id="consumption-graph", config={"scrollZoom": True}),
             dcc.Graph(id="feed-in-graph", config={"scrollZoom": True}),
             dcc.Graph(id="net-usage-graph", config={"scrollZoom": True}),
@@ -156,6 +97,9 @@ app.layout = html.Div([
         ], style={"width": "30%", "display": "inline-block", "verticalAlign": "top", "padding": "20px"}),
     ]),
 
+    # Store für den aktuellen Zeitraum
+    dcc.Store(id="time-range", data={"start": datetime.now() - timedelta(hours=24)}),
+
     dcc.Interval(
         id="interval-update",
         interval=1000,  # Alle 1 Sekunde aktualisieren
@@ -165,76 +109,75 @@ app.layout = html.Div([
 
 
 @app.callback(
+    Output("time-range", "data"),
+    [Input("btn-24h", "n_clicks"),
+     Input("btn-1h", "n_clicks"),
+     Input("btn-30m", "n_clicks"),
+     Input("btn-10m", "n_clicks")]
+)
+def update_time_range(btn_24h, btn_1h, btn_30m, btn_10m):
+    now = datetime.now()
+    ctx = dash.callback_context
+
+    if not ctx.triggered:
+        return {"start": now - timedelta(hours=24)}
+
+    button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    if button_id == "btn-24h":
+        return {"start": now - timedelta(hours=24)}
+    elif button_id == "btn-1h":
+        return {"start": now - timedelta(hours=1)}
+    elif button_id == "btn-30m":
+        return {"start": now - timedelta(minutes=30)}
+    elif button_id == "btn-10m":
+        return {"start": now - timedelta(minutes=10)}
+
+    return {"start": now - timedelta(hours=24)}
+
+
+@app.callback(
     [Output("consumption-graph", "figure"),
      Output("feed-in-graph", "figure"),
      Output("net-usage-graph", "figure"),
-     Output("combined-graph", "figure"),
-     Output("total-consumption", "children"),
-     Output("surplus-energy", "children"),
-     Output("generated-energy", "children")],
-    [Input("interval-update", "n_intervals")]
+     Output("combined-graph", "figure")],
+    [Input("interval-update", "n_intervals"),
+     Input("time-range", "data")]
 )
-def update_graphs(n_intervals):
-    global data_log, statistics_log, total_consumption, surplus_energy, generated_energy
+def update_graphs(n_intervals, time_range):
+    start_time = datetime.fromisoformat(time_range["start"])
+    now = datetime.now()
 
-    # Daten abrufen
-    power_values = get_shelly_data()
-    if not power_values or all(v == 0 for v in power_values):
-        return {}, {}, {}, {}, "Stromverbrauch: 0.0000 kWh", "Verschenkter Strom: 0.0000 kWh", "Erzeugte Energie: 0.0000 kWh"
+    # Filter Daten basierend auf dem ausgewählten Zeitraum
+    filtered_indices = [i for i, timestamp in enumerate(data_log["timestamps"]) if start_time <= timestamp <= now]
 
-    consumption, feed_in, net_usage = calculate_energy(power_values)
-    current_time = datetime.now()
-
-    # Daten in den Speicher schreiben
-    data_log["timestamps"].append(current_time)
-    data_log["consumption"].append(consumption)
-    data_log["feed_in"].append(feed_in)
-    data_log["net_usage"].append(net_usage)
-
-    # Berechnung der Werte in Wattsekunden
-    total_consumption += consumption
-    if net_usage < 0:
-        surplus_energy += abs(net_usage)
-    generated_energy += feed_in
-
-    # Umrechnung in kWh
-    total_consumption_kwh = total_consumption / 3600000
-    surplus_energy_kwh = surplus_energy / 3600000
-    generated_energy_kwh = generated_energy / 3600000
-
-    statistics_log["timestamps"].append(current_time)
-    statistics_log["total_consumption"].append(total_consumption_kwh)
-    statistics_log["surplus_energy"].append(surplus_energy_kwh)
-    statistics_log["generated_energy"].append(generated_energy_kwh)
-
-    # Daten trimmen und speichern
-    trim_data_log()
-    save_data_log()
-    save_statistics_log()
+    timestamps = [data_log["timestamps"][i].strftime("%H:%M:%S") for i in filtered_indices]
+    consumption = [data_log["consumption"][i] for i in filtered_indices]
+    feed_in = [data_log["feed_in"][i] for i in filtered_indices]
+    net_usage = [data_log["net_usage"][i] for i in filtered_indices]
 
     # Einzelne Graphen
-    timestamps = [t.strftime("%H:%M:%S") for t in data_log["timestamps"]]
     consumption_fig = {
-        "data": [{"x": timestamps, "y": data_log["consumption"], "type": "scatter", "mode": "lines", "name": "Verbrauch", "line": {"shape": "spline", "color": "red"}}],
+        "data": [{"x": timestamps, "y": consumption, "type": "scatter", "mode": "lines", "name": "Verbrauch", "line": {"shape": "spline", "color": "red"}}],
         "layout": {"title": "Stromverbrauch (W)", "uirevision": "constant"}
     }
 
     feed_in_fig = {
-        "data": [{"x": timestamps, "y": data_log["feed_in"], "type": "scatter", "mode": "lines", "name": "Einspeisung", "line": {"shape": "spline", "color": "green"}}],
+        "data": [{"x": timestamps, "y": feed_in, "type": "scatter", "mode": "lines", "name": "Einspeisung", "line": {"shape": "spline", "color": "green"}}],
         "layout": {"title": "Einspeisung (W)", "uirevision": "constant"}
     }
 
     net_usage_fig = {
-        "data": [{"x": timestamps, "y": data_log["net_usage"], "type": "scatter", "mode": "lines", "name": "Netzbezug", "line": {"shape": "spline", "color": "blue"}}],
+        "data": [{"x": timestamps, "y": net_usage, "type": "scatter", "mode": "lines", "name": "Netzbezug", "line": {"shape": "spline", "color": "blue"}}],
         "layout": {"title": "Netzbezug (W)", "uirevision": "constant"}
     }
 
     # Kombinierter Graph
     combined_fig = {
         "data": [
-            {"x": timestamps, "y": data_log["consumption"], "type": "scatter", "mode": "lines", "name": "Verbrauch", "line": {"shape": "spline", "color": "red"}},
-            {"x": timestamps, "y": data_log["feed_in"], "type": "scatter", "mode": "lines", "name": "Einspeisung", "line": {"shape": "spline", "color": "green"}},
-            {"x": timestamps, "y": data_log["net_usage"], "type": "scatter", "mode": "lines", "name": "Netzbezug", "line": {"shape": "spline", "color": "blue"}}
+            {"x": timestamps, "y": consumption, "type": "scatter", "mode": "lines", "name": "Verbrauch", "line": {"shape": "spline", "color": "red"}},
+            {"x": timestamps, "y": feed_in, "type": "scatter", "mode": "lines", "name": "Einspeisung", "line": {"shape": "spline", "color": "green"}},
+            {"x": timestamps, "y": net_usage, "type": "scatter", "mode": "lines", "name": "Netzbezug", "line": {"shape": "spline", "color": "blue"}}
         ],
         "layout": {
             "title": "Kombinierter Graph: Verbrauch, Einspeisung und Netzbezug",
@@ -245,12 +188,10 @@ def update_graphs(n_intervals):
         }
     }
 
-    return consumption_fig, feed_in_fig, net_usage_fig, combined_fig, f"Stromverbrauch: {total_consumption_kwh:.4f} kWh", f"Verschenkter Strom: {surplus_energy_kwh:.4f} kWh", f"Erzeugte Energie: {generated_energy_kwh:.4f} kWh"
+    return consumption_fig, feed_in_fig, net_usage_fig, combined_fig
 
 
 # Anwendung starten
 if __name__ == "__main__":
-    load_data_log()  # Daten beim Start laden
-    load_statistics_log()
     port = int(os.environ.get("PORT", 8050))
     app.run_server(debug=True, host="0.0.0.0", port=port)
