@@ -27,46 +27,12 @@ data_log = {
     "net_usage": []
 }
 
-# Statistiken für "Stromverbrauch", "Verschenkter Strom" und "Erzeugte Energie"
-statistics_log = {
-    "timestamps": [],
-    "total_consumption": [],  # Stromverbrauch in kWh
-    "surplus_energy": [],  # Verschenkter Strom in kWh
-    "generated_energy": []  # Erzeugte Energie in kWh
-}
-
-# Variablen zur Berechnung der Werte
-total_consumption = 0  # in Wattsekunden
-surplus_energy = 0  # in Wattsekunden
-generated_energy = 0  # in Wattsekunden
-
-
-# Funktion, um Daten von der Shelly Cloud API abzurufen
-def get_shelly_data():
-    try:
-        response = requests.get(API_URL)
-        if response.status_code == 200:
-            data = response.json()
-
-            # Extrahieren der Leistungsdaten aus 'emeters'
-            if "data" in data and "device_status" in data["data"] and "emeters" in data["data"]["device_status"]:
-                emeters = data["data"]["device_status"]["emeters"]
-                power_values = [float(phase.get("power", 0)) for phase in emeters]
-                return power_values
-            else:
-                return [0.0, 0.0, 0.0]
-        else:
-            return [0.0, 0.0, 0.0]
-    except Exception:
-        return [0.0, 0.0, 0.0]
-
-
 # Layout der App
 app.layout = html.Div([
     html.H1("Shelly 3EM Dashboard", style={"textAlign": "center"}),
 
     html.Div([
-        # Linke Spalte: Graphen und Buttons
+        # Linke Spalte: Buttons und Graphen
         html.Div([
             # Buttons für die Zeiträume
             html.Div([
@@ -98,7 +64,7 @@ app.layout = html.Div([
     ]),
 
     # Store für den aktuellen Zeitraum
-    dcc.Store(id="time-range", data={"start": datetime.now() - timedelta(hours=24)}),
+    dcc.Store(id="time-range", data={"start": (datetime.now() - timedelta(hours=24)).isoformat()}),
 
     dcc.Interval(
         id="interval-update",
@@ -107,7 +73,7 @@ app.layout = html.Div([
     )
 ])
 
-
+# Zeitraum-Callback: Aktualisiert den Zeitraum basierend auf den Buttons
 @app.callback(
     Output("time-range", "data"),
     [Input("btn-24h", "n_clicks"),
@@ -120,29 +86,32 @@ def update_time_range(btn_24h, btn_1h, btn_30m, btn_10m):
     ctx = dash.callback_context
 
     if not ctx.triggered:
-        return {"start": now - timedelta(hours=24)}
+        return {"start": (now - timedelta(hours=24)).isoformat()}
 
     button_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
     if button_id == "btn-24h":
-        return {"start": now - timedelta(hours=24)}
+        return {"start": (now - timedelta(hours=24)).isoformat()}
     elif button_id == "btn-1h":
-        return {"start": now - timedelta(hours=1)}
+        return {"start": (now - timedelta(hours=1)).isoformat()}
     elif button_id == "btn-30m":
-        return {"start": now - timedelta(minutes=30)}
+        return {"start": (now - timedelta(minutes=30)).isoformat()}
     elif button_id == "btn-10m":
-        return {"start": now - timedelta(minutes=10)}
+        return {"start": (now - timedelta(minutes=10)).isoformat()}
 
-    return {"start": now - timedelta(hours=24)}
+    return {"start": (now - timedelta(hours=24)).isoformat()}
 
-
+# Graphen-Update-Callback: Aktualisiert die Graphen basierend auf dem Zeitraum
 @app.callback(
     [Output("consumption-graph", "figure"),
      Output("feed-in-graph", "figure"),
      Output("net-usage-graph", "figure"),
-     Output("combined-graph", "figure")],
+     Output("combined-graph", "figure"),
+     Output("total-consumption", "children"),
+     Output("surplus-energy", "children"),
+     Output("generated-energy", "children")],
     [Input("interval-update", "n_intervals"),
-     Input("time-range", "data")]
+     State("time-range", "data")]
 )
 def update_graphs(n_intervals, time_range):
     start_time = datetime.fromisoformat(time_range["start"])
@@ -150,6 +119,9 @@ def update_graphs(n_intervals, time_range):
 
     # Filter Daten basierend auf dem ausgewählten Zeitraum
     filtered_indices = [i for i, timestamp in enumerate(data_log["timestamps"]) if start_time <= timestamp <= now]
+
+    if not filtered_indices:  # Wenn keine Daten verfügbar sind
+        return {}, {}, {}, {}, "Stromverbrauch: 0.0000 kWh", "Verschenkter Strom: 0.0000 kWh", "Erzeugte Energie: 0.0000 kWh"
 
     timestamps = [data_log["timestamps"][i].strftime("%H:%M:%S") for i in filtered_indices]
     consumption = [data_log["consumption"][i] for i in filtered_indices]
@@ -188,7 +160,7 @@ def update_graphs(n_intervals, time_range):
         }
     }
 
-    return consumption_fig, feed_in_fig, net_usage_fig, combined_fig
+    return consumption_fig, feed_in_fig, net_usage_fig, combined_fig, "Stromverbrauch: 0.0000 kWh", "Verschenkter Strom: 0.0000 kWh", "Erzeugte Energie: 0.0000 kWh"
 
 
 # Anwendung starten
